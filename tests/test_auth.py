@@ -76,3 +76,4 @@ def test_settings_validation():
         create_app(make_settings(agent_base_url="http://evil.example"))
     with pytest.raises(RuntimeError, match="AGENT_API_KEY"):
         create_app(make_settings(agent_api_key=""))
+    make_settings(agent_base_url="http://localhost:8000").validate_for_startup()
