@@ -388,6 +388,90 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /v1/admin/users:
+    post:
+      tags: [admin]
+      operationId: adminCreateUser
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                timezone: { type: string, default: America/New_York }
+                signature: { type: string }
+                send_mode: { $ref: "#/components/schemas/SendMode" }
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "409": { description: User already exists. }
+        "422": { description: Invalid email or time zone. }
+  /v1/admin/api-clients:
+    post:
+      tags: [admin]
+      operationId: adminCreateApiClient
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                webhook_url: { type: [string, "null"], format: uri }
+                user_emails: { type: array, items: { type: string, format: email } }
+      responses:
+        "201":
+          description: Created. api_key and webhook_secret are shown only once.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+                  api_key: { type: string }
+                  webhook_secret: { type: string }
+                  webhook_url: { type: [string, "null"] }
+  /v1/admin/api-clients/{client_id}/users:
+    post:
+      tags: [admin]
+      operationId: adminGrantUsers
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { name: client_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_emails]
+              properties:
+                user_emails: { type: array, items: { type: string, format: email } }
+      responses:
+        "200": { description: Granted. }
+        "404": { description: Unknown client or user. }
+  /v1/admin/api-clients/{client_id}/revoke:
+    post:
+      tags: [admin]
+      operationId: adminRevokeApiClient
+      security: [{ adminAuth: [] }]
+      parameters:
+        - { name: client_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Revoked; the key stops working immediately. }
+        "404": { description: Unknown client. }
 
 webhooks:
   agentEvent:
@@ -500,6 +584,7 @@ components:
         wait_business_days: { type: integer, minimum: 0, maximum: 30 }
         max_followups: { type: integer, minimum: 1, maximum: 5 }
         send_mode: { oneOf: [{ $ref: "#/components/schemas/SendMode" }, { type: "null" }] }
+        gmail_thread_id: { type: [string, "null"], maxLength: 100 }
 
     Task:
       type: object
