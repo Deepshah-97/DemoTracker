@@ -1,0 +1,20 @@
+<a href="/tasks/{{ c.agent_task_id }}" class="block card p-3 hover:border-slate-400 text-sm">
+  <div class="flex items-start gap-2">
+    <div class="font-medium text-slate-900 truncate">{{ c.client_name or c.client_email }}</div>
+    <div class="ml-auto flex gap-1 shrink-0">
+      {% if c.paused %}<span class="pill pill-paused">Paused</span>{% endif %}
+      {% if c.simulated %}<span class="pill pill-sim">SIM</span>{% endif %}
+    </div>
+  </div>
+  <div class="text-xs text-slate-500 truncate">{{ c.client_company or "" }}</div>
+  <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+    <span>{{ scenario_guide[c.scenario].label if c.scenario in scenario_guide else c.scenario }}</span>
+    <span>{{ c.owner_email.split('@')[0] }}</span>
+    <span title="Follow-ups sent / max">{{ c.followup_count }}/{{ c.max_followups }} sent</span>
+  </div>
+  <div class="mt-1 text-xs text-slate-500">
+    {% if c.status in ("waiting", "followed_up") %}Next check {{ c.next_check_at | when }}{% else %}<span class="pill pill-{{ c.status }}">{{ status_labels.get(c.status, c.status) }}</span>{% endif %}
+    {% if c.status == "followed_up" and c.followup_count < c.max_followups %}<span class="block">More follow-ups possible</span>{% endif %}
+  </div>
+  <div class="text-[11px] text-slate-400 mt-1">{{ c.external_id }}</div>
+</a>

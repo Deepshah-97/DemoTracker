@@ -1,0 +1,17 @@
+{% set p = json_loads(e.payload) %}
+<details class="px-4 py-2.5 text-sm event-new" id="evt-{{ e.seq }}">
+  <summary class="cursor-pointer list-none">
+    <div class="flex items-center gap-2">
+      <span class="text-green-600" title="Signature verified (HMAC-SHA256)">&#10003;</span>
+      <code class="font-semibold text-slate-900">{{ e.event }}</code>
+      {% if e.simulated %}<span class="pill pill-sim">SIMULATED</span>{% endif %}
+      <span class="ml-auto text-xs text-slate-500">{{ e.received_at | when }}</span>
+    </div>
+    <div class="text-xs text-slate-500 mt-0.5 pl-5">
+      {% if p.external_id %}{{ p.external_id }}{% endif %}
+      {% if p.task_status %} &middot; {{ p.task_status }}{% endif %}
+      {% if p.data and p.data.subject %} &middot; {{ p.data.subject }}{% endif %}
+    </div>
+  </summary>
+  <pre class="json mt-2">{{ e.payload | pretty }}</pre>
+</details>

@@ -1,0 +1,680 @@
+openapi: 3.1.0
+info:
+  title: Follow-Up Agent API
+  version: 1.1.0
+  description: |
+    Public contract between the Follow-Up Agent and any dashboard (v1.1).
+    The agent owns this file. Dashboards must use only these routes and webhooks.
+
+    * Every request: `Authorization: Bearer <api_key>`.
+    * Every mutating request accepts `Idempotency-Key`; identical retries return the original result.
+    * Errors: `{"error": {"code": "...", "message": "..."}}` with a matching HTTP status.
+    * API clients are scoped to the users and tasks they are authorized for; out-of-scope
+      resources return 404 (tasks) or 403 (users).
+servers:
+  - url: https://api.example.com
+security:
+  - bearerAuth: []
+
+tags:
+  - name: tasks
+  - name: drafts
+  - name: users
+  - name: admin
+  - name: system
+
+paths:
+  /v1/health:
+    get:
+      tags: [system]
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: Service is alive.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  test_mode: { type: boolean, description: True when server TEST_MODE is on. }
+                  version: { type: string }
+
+  /v1/tasks:
+    post:
+      tags: [tasks]
+      operationId: createTask
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskCreate" }
+      responses:
+        "201":
+          description: Task created (or the original task on an identical retry).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/TaskStatus" } }
+        - { name: owner_email, in: query, schema: { type: string, format: email } }
+        - { name: scenario, in: query, schema: { $ref: "#/components/schemas/Scenario" } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Page of tasks.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Task" }
+                  next_cursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{task_id}:
+    parameters: [{ $ref: "#/components/parameters/TaskId" }]
+    get:
+      tags: [tasks]
+      operationId: getTask
+      responses:
+        "200":
+          description: Task detail with follow-up history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [tasks]
+      operationId: updateTask
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskUpdate" }
+      responses:
+        "200":
+          description: Updated task.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{task_id}/pause:
+    post:
+      tags: [tasks]
+      operationId: pauseTask
+      parameters: [{ $ref: "#/components/parameters/TaskId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { $ref: "#/components/responses/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/tasks/{task_id}/resume:
+    post:
+      tags: [tasks]
+      operationId: resumeTask
+      description: Clears the paused flag. After a rejection, redrafts within the same sequence record.
+      parameters: [{ $ref: "#/components/parameters/TaskId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "200": { $ref: "#/components/responses/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/tasks/{task_id}/stop:
+    post:
+      tags: [tasks]
+      operationId: stopTask
+      parameters: [{ $ref: "#/components/parameters/TaskId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        "200": { $ref: "#/components/responses/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{task_id}/preview:
+    post:
+      tags: [tasks]
+      operationId: previewTask
+      description: Generates a non-sending preview. Never creates a sendable draft.
+      parameters: [{ $ref: "#/components/parameters/TaskId" }]
+      responses:
+        "200":
+          description: Preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preview" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{task_id}/run:
+    post:
+      tags: [tasks]
+      operationId: runTask
+      description: |
+        Requests an eligibility check now. Bypasses only the waiting interval (and, in server
+        TEST_MODE with allowlisted addresses, the send window and random delay). Recipient checks,
+        stop conditions, limits, idempotency and approval remain enforced.
+      parameters: [{ $ref: "#/components/parameters/TaskId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      responses:
+        "202":
+          description: Check accepted; outcome arrives by webhook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RunResult" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/tasks/{task_id}/events:
+    post:
+      tags: [tasks]
+      operationId: postTaskEvent
+      description: Idempotent external stop events (keyed by source_event_id).
+      parameters: [{ $ref: "#/components/parameters/TaskId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExternalEvent" }
+      responses:
+        "200": { $ref: "#/components/responses/TaskDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /v1/drafts:
+    get:
+      tags: [drafts]
+      operationId: listDrafts
+      responses:
+        "200":
+          description: Drafts awaiting approval.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Draft" }
+
+  /v1/drafts/{draft_id}/approve:
+    post:
+      tags: [drafts]
+      operationId: approveDraft
+      description: |
+        Approves a drafted record (optionally edited). Edited text re-runs server-side safety checks.
+        Sending happens asynchronously at the next valid send time; followup.sent confirms delivery.
+      parameters: [{ $ref: "#/components/parameters/DraftId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subject: { type: string }
+                body: { type: string }
+      responses:
+        "202":
+          description: Approved and queued (or the original result on retry).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Followup" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /v1/drafts/{draft_id}/reject:
+    post:
+      tags: [drafts]
+      operationId: rejectDraft
+      description: Keeps the rejected version for audit, does not count as a send, and pauses the task.
+      parameters: [{ $ref: "#/components/parameters/DraftId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                feedback: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: Rejected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Followup" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /v1/users:
+    get:
+      tags: [users]
+      operationId: listUsers
+      responses:
+        "200":
+          description: Team members visible to this API client.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+
+  /v1/users/{user_id}:
+    patch:
+      tags: [users]
+      operationId: updateUser
+      parameters: [{ $ref: "#/components/parameters/UserId" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/users/{user_id}/connect:
+    get:
+      tags: [users]
+      operationId: connectUser
+      description: Returns a Google sign-in URL bound to this user with an expiring state value.
+      parameters: [{ $ref: "#/components/parameters/UserId" }]
+      responses:
+        "200":
+          description: Sign-in URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expires_at]
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /v1/users/{user_id}/threads:
+    get:
+      tags: [users]
+      operationId: listUserThreads
+      parameters:
+        - { $ref: "#/components/parameters/UserId" }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 25, default: 10 } }
+      responses:
+        "200":
+          description: Recent Gmail threads.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ThreadSummary" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /oauth/google/callback:
+    get:
+      tags: [users]
+      operationId: oauthCallback
+      security: []
+      description: Google redirect target. Not called by dashboards.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Connected. HTML page. }
+        "400": { description: "Invalid or expired state, or wrong Google identity." }
+
+  /v1/admin/pause-all:
+    post:
+      tags: [admin]
+      operationId: adminPauseAll
+      security: [{ adminAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paused: { type: boolean, default: true }
+      responses:
+        "200":
+          description: Global pause state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paused: { type: boolean }
+  /v1/admin/export:
+    get:
+      tags: [admin]
+      operationId: adminExport
+      security: [{ adminAuth: [] }]
+      responses:
+        "200":
+          description: All company data as JSON (no tokens).
+          content:
+            application/json:
+              schema: { type: object }
+
+webhooks:
+  agentEvent:
+    post:
+      summary: Event delivered to an API client's webhook_url.
+      description: |
+        Header `X-Signature` = hex HMAC-SHA256 of the exact raw body with the client's webhook_secret.
+        Delivered from an outbox with retry/backoff; receivers must dedupe by event_id and tolerate
+        unknown events and fields.
+      parameters:
+        - { name: X-Signature, in: header, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEvent" }
+      responses:
+        "200": { description: Accepted. }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+    adminAuth: { type: http, scheme: bearer, description: ADMIN_API_KEY }
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 200 }
+    TaskId: { name: task_id, in: path, required: true, schema: { type: string } }
+    DraftId: { name: draft_id, in: path, required: true, schema: { type: string } }
+    UserId: { name: user_id, in: path, required: true, schema: { type: string } }
+
+  responses:
+    Error:
+      description: Error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TaskDetail:
+      description: Task detail.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TaskDetail" }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+
+    Scenario:
+      type: string
+      enum: [no_reply, new_lead, post_demo, proposal_sent, meeting_no_show, custom]
+    TaskStatus:
+      type: string
+      enum: [waiting, draft_pending, followed_up, replied, stopped, exhausted, error]
+    SendMode:
+      type: string
+      enum: [approve, auto]
+    FollowupStatus:
+      type: string
+      enum: [drafted, approved, sending, sent, rejected, failed, delivery_unknown, canceled]
+
+    Client:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        company: { type: [string, "null"] }
+
+    TaskCreate:
+      type: object
+      required: [external_id, owner_email, scenario, client]
+      properties:
+        external_id: { type: string, maxLength: 100 }
+        owner_email: { type: string, format: email }
+        scenario: { $ref: "#/components/schemas/Scenario" }
+        goal: { type: [string, "null"], description: Required for custom. }
+        client: { $ref: "#/components/schemas/Client" }
+        gmail_thread_id: { type: [string, "null"] }
+        notes: { type: [string, "null"], maxLength: 10000 }
+        wait_business_days: { type: [integer, "null"], minimum: 0, maximum: 30 }
+        max_followups: { type: [integer, "null"], minimum: 1, maximum: 5 }
+        send_mode: { oneOf: [{ $ref: "#/components/schemas/SendMode" }, { type: "null" }] }
+        scenario_trigger_at:
+          type: [string, "null"]
+          format: date-time
+          description: |
+            Scenario baseline. Required for post_demo, proposal_sent, meeting_no_show and custom;
+            for new_lead required when no thread exists. no_reply uses the thread's last owner outbound.
+        trigger_type:
+          type: [string, "null"]
+          description: e.g. demo_completed_at, proposal_sent_at, no_show_recorded_at, lead_created_at.
+        paused: { type: boolean, default: false }
+        allow_new_thread: { type: boolean, default: false, description: Only honoured for new_lead. }
+
+    TaskUpdate:
+      type: object
+      properties:
+        notes: { type: [string, "null"] }
+        goal: { type: [string, "null"] }
+        wait_business_days: { type: integer, minimum: 0, maximum: 30 }
+        max_followups: { type: integer, minimum: 1, maximum: 5 }
+        send_mode: { oneOf: [{ $ref: "#/components/schemas/SendMode" }, { type: "null" }] }
+
+    Task:
+      type: object
+      required: [id, external_id, owner_user_id, owner_email, scenario, status, paused, followup_count, max_followups, created_at, updated_at]
+      properties:
+        id: { type: string }
+        external_id: { type: string }
+        owner_user_id: { type: string }
+        owner_email: { type: string }
+        scenario: { $ref: "#/components/schemas/Scenario" }
+        status: { $ref: "#/components/schemas/TaskStatus" }
+        paused: { type: boolean }
+        pause_reason: { type: [string, "null"] }
+        client: { $ref: "#/components/schemas/Client" }
+        gmail_thread_id: { type: [string, "null"] }
+        followup_count: { type: integer }
+        max_followups: { type: integer }
+        wait_business_days: { type: integer }
+        send_mode: { oneOf: [{ $ref: "#/components/schemas/SendMode" }, { type: "null" }] }
+        scenario_trigger_at: { type: [string, "null"], format: date-time }
+        next_check_at: { type: [string, "null"], format: date-time }
+        last_outbound_at: { type: [string, "null"], format: date-time }
+        last_inbound_at: { type: [string, "null"], format: date-time }
+        stop_reason: { type: [string, "null"] }
+        error_message: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          properties:
+            notes: { type: [string, "null"] }
+            goal: { type: [string, "null"] }
+            gmail_thread_url: { type: [string, "null"] }
+            followups:
+              type: array
+              items: { $ref: "#/components/schemas/Followup" }
+            timeline:
+              type: array
+              items: { $ref: "#/components/schemas/TimelineEntry" }
+
+    Followup:
+      type: object
+      required: [id, task_id, sequence_number, status]
+      properties:
+        id: { type: string }
+        task_id: { type: string }
+        sequence_number: { type: integer }
+        draft_revision: { type: integer }
+        status: { $ref: "#/components/schemas/FollowupStatus" }
+        subject: { type: [string, "null"] }
+        body: { type: [string, "null"] }
+        needs_review: { type: boolean }
+        reason: { type: [string, "null"] }
+        edited: { type: boolean }
+        gmail_message_id: { type: [string, "null"] }
+        scheduled_send_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        sent_at: { type: [string, "null"], format: date-time }
+
+    Draft:
+      type: object
+      required: [id, task_id, sequence_number, subject, body, needs_review]
+      properties:
+        id: { type: string }
+        task_id: { type: string }
+        external_id: { type: string }
+        sequence_number: { type: integer }
+        subject: { type: string }
+        body: { type: string }
+        needs_review: { type: boolean }
+        reason: { type: [string, "null"] }
+        context_summary: { type: [string, "null"], description: Safe summary; never the raw thread. }
+        client: { $ref: "#/components/schemas/Client" }
+        owner_email: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Preview:
+      type: object
+      required: [subject, body, needs_review]
+      properties:
+        subject: { type: string }
+        body: { type: string }
+        needs_review: { type: boolean }
+        reason: { type: [string, "null"] }
+        context_summary: { type: [string, "null"] }
+        safety_failures:
+          type: array
+          items: { type: string }
+        sequence_number: { type: integer }
+
+    RunResult:
+      type: object
+      required: [task_id, accepted]
+      properties:
+        task_id: { type: string }
+        accepted: { type: boolean }
+        test_mode: { type: boolean }
+        message: { type: string }
+
+    ExternalEvent:
+      type: object
+      required: [type, occurred_at, source_event_id]
+      properties:
+        type: { type: string, enum: [meeting_booked, task_closed, opted_out] }
+        occurred_at: { type: string, format: date-time }
+        source_event_id: { type: string, maxLength: 200 }
+        note: { type: [string, "null"] }
+
+    TimelineEntry:
+      type: object
+      required: [at, type]
+      properties:
+        at: { type: string, format: date-time }
+        type: { type: string }
+        detail: { type: [string, "null"] }
+
+    User:
+      type: object
+      required: [id, email, name, send_mode, paused, gmail_connected]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        name: { type: string }
+        timezone: { type: string }
+        send_mode: { $ref: "#/components/schemas/SendMode" }
+        paused: { type: boolean }
+        gmail_connected: { type: boolean }
+        gmail_status: { type: string, enum: [connected, disconnected, never_connected] }
+
+    UserUpdate:
+      type: object
+      properties:
+        signature: { type: string }
+        style_examples: { type: array, items: { type: string }, maxItems: 10 }
+        timezone: { type: string }
+        send_mode: { $ref: "#/components/schemas/SendMode" }
+        paused: { type: boolean }
+
+    ThreadSummary:
+      type: object
+      required: [thread_id, subject]
+      properties:
+        thread_id: { type: string }
+        subject: { type: string }
+        last_sender: { type: string }
+        date: { type: string, format: date-time }
+
+    WebhookEventName:
+      type: string
+      description: Known events. Receivers must accept unknown names.
+      enum: [draft.ready, draft.rejected, followup.sent, task.replied, task.stopped, task.exhausted, task.error, user.disconnected, daily.summary]
+
+    WebhookEvent:
+      type: object
+      required: [event_id, event, occurred_at]
+      additionalProperties: true
+      properties:
+        event_id: { type: string }
+        event: { type: string }
+        task_id: { type: [string, "null"] }
+        external_id: { type: [string, "null"] }
+        occurred_at: { type: string, format: date-time }
+        task_status: { oneOf: [{ $ref: "#/components/schemas/TaskStatus" }, { type: "null" }] }
+        paused: { type: [boolean, "null"] }
+        followup_count: { type: [integer, "null"] }
+        next_check_at: { type: [string, "null"], format: date-time }
+        data:
+          type: object
+          additionalProperties: true
+          description: |
+            Event-specific payload. draft.ready: draft_id, sequence_number, subject, needs_review.
+            followup.sent: sequence_number, subject, body, sent_at, gmail_link.
+            draft.rejected: draft_id, sequence_number, feedback. task.replied/task.stopped: reason.
+            task.error: code, message. user.disconnected: user_id, email.
+            daily.summary: sent, drafted, replied, errors, ai_spend_usd.

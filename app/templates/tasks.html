@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Tasks · Follow-Up Demo{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-center gap-2 mb-4">
+  <h1 class="text-xl font-semibold">Tasks</h1>
+  <form method="post" action="/refresh" class="ml-auto" hx-disabled-elt="find button">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="back" value="/tasks">
+    <button class="btn" title="Re-sync every card with GET /v1/tasks"><span class="spin"></span>Refresh from agent</button>
+  </form>
+  <a href="/tasks/new" class="btn btn-primary">New task</a>
+</div>
+{% include "partials/board.html" %}
+{% if not cards %}
+  <p class="text-sm text-slate-500 mt-4">No tasks yet. Press New task to track a quiet conversation.</p>
+{% endif %}
+{% endblock %}

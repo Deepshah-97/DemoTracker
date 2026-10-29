@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Team · Follow-Up Demo{% endblock %}
+{% macro update(uid, field, value, label, cls="btn") %}
+  <form method="post" action="/team/{{ uid }}/update" hx-disabled-elt="find button">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="idem" value="{{ new_key() }}">
+    <input type="hidden" name="field" value="{{ field }}"><input type="hidden" name="value" value="{{ value }}">
+    <button class="{{ cls }}"><span class="spin"></span>{{ label }}</button>
+  </form>
+{% endmacro %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-1">Team</h1>
+<p class="text-sm text-slate-500 mb-4">Only provisioned, authorized test users can connect Gmail. The dashboard never sees Google credentials.</p>
+{% if error %}<div class="card border-red-300 bg-red-50 p-3 mb-4 text-sm text-red-800" role="alert">{{ error }}</div>{% endif %}
+<div class="card divide-y divide-slate-100">
+  {% for u in users %}
+    <div class="p-4 flex flex-wrap items-center gap-3 text-sm">
+      <div class="min-w-[12rem]">
+        <div class="font-medium">{{ u.name }}</div>
+        <div class="text-slate-500 text-xs">{{ u.email }}{% if u.timezone %} &middot; {{ u.timezone }}{% endif %}</div>
+      </div>
+      <span class="pill {{ 'pill-replied' if u.gmail_connected else 'pill-error' }}">{{ 'Gmail connected' if u.gmail_connected else 'Gmail ' ~ (u.gmail_status or 'not connected').replace('_', ' ') }}</span>
+      <span class="pill pill-waiting">Send mode: {{ u.send_mode }}</span>
+      {% if u.paused %}<span class="pill pill-paused">Paused</span>{% endif %}
+      <div class="ml-auto flex flex-wrap gap-2">
+        {% if not u.gmail_connected %}
+          <form method="post" action="/team/{{ u.id }}/connect" hx-boost="false"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <button class="btn btn-primary">Connect Gmail</button></form>
+        {% endif %}
+        {{ update(u.id, "send_mode", "auto" if u.send_mode == "approve" else "approve", "Switch to " ~ ("auto" if u.send_mode == "approve" else "approve")) }}
+        {{ update(u.id, "paused", "false" if u.paused else "true", "Resume sends" if u.paused else "Pause sends") }}
+      </div>
+    </div>
+  {% else %}
+    {% if not error %}<p class="p-4 text-sm text-slate-500">No team members are provisioned for this dashboard yet. Ask the agent admin to add them.</p>{% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

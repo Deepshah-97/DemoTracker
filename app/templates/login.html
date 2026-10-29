@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Follow-Up Demo</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-4">
+  <form method="post" action="/login" class="card p-6 w-full max-w-sm space-y-4">
+    <div>
+      <h1 class="text-lg font-semibold">Follow-Up Agent demo</h1>
+      <p class="text-sm text-slate-500">Shared demo login. Test data only.</p>
+    </div>
+    <span class="mode-badge mode-{{ mode.key }}">{{ mode.label }}</span>
+    {% if error %}<p class="text-sm text-red-700" role="alert">{{ error }}</p>{% endif %}
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="block"><span class="label">Password</span>
+      <input class="field" type="password" name="password" autocomplete="current-password" required autofocus></label>
+    <button class="btn btn-primary w-full justify-center">Sign in</button>
+  </form>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<div id="preview" class="card p-4 mt-4 border-dashed">
+  {% if error %}
+    <p class="text-sm text-red-700">{{ error }}</p>
+  {% else %}
+    <div class="flex items-center gap-2 mb-2">
+      <h3 class="font-semibold text-sm">Preview of follow-up {{ preview.sequence_number }}</h3>
+      <span class="pill pill-waiting">Not sent, not saved</span>
+      {% if mock %}<span class="pill pill-sim">SIMULATED</span>{% endif %}
+      {% if preview.needs_review %}<span class="pill pill-error">Needs review</span>{% endif %}
+    </div>
+    <div class="text-sm"><span class="text-slate-500">Subject:</span> {{ preview.subject }}</div>
+    <pre class="whitespace-pre-wrap text-sm mt-2 font-sans bg-slate-50 p-3 rounded">{{ preview.body }}</pre>
+    {% if preview.reason %}<p class="text-xs text-slate-600 mt-2"><strong>Why:</strong> {{ preview.reason }}</p>{% endif %}
+    {% if preview.context_summary %}<p class="text-xs text-slate-600 mt-1"><strong>Context used:</strong> {{ preview.context_summary }}</p>{% endif %}
+    {% if preview.safety_failures %}<p class="text-xs text-red-700 mt-1"><strong>Safety checks:</strong> {{ preview.safety_failures | join(", ") }}</p>{% endif %}
+  {% endif %}
+</div>

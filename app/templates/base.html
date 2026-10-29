@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"(422|429)","swap":true},{"code":"[45]..","swap":false,"error":true}]}'>
+  <title>{% block title %}Follow-Up Demo{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen"
+      hx-boost="true"
+      hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'
+      hx-ext="sse"
+      sse-connect="/events/stream?after={{ (events[0].seq if events else 0) }}">
+
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+    <div class="flex flex-wrap items-center gap-3 px-4 py-3">
+      <a href="/" class="font-semibold text-slate-900 mr-2">Follow-Up Agent <span class="text-slate-400 font-normal">demo</span></a>
+      <nav class="flex flex-wrap gap-1 text-sm">
+        {% for href, label in [("/", "Overview"), ("/tasks", "Tasks"), ("/drafts", "Drafts"), ("/team", "Team")] %}
+          <a href="{{ href }}" class="px-3 py-1.5 rounded-md {{ 'bg-slate-900 text-white' if path == href or (href != '/' and path.startswith(href)) else 'text-slate-600 hover:bg-slate-100' }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+      <div class="ml-auto flex flex-wrap items-center gap-2 text-sm">
+        <span class="mode-badge mode-{{ mode.key }}" title="Which agent this dashboard is talking to">{{ mode.label }}</span>
+        <form method="post" action="/demo-mode">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="back" value="{{ path }}">
+          <button class="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-100" title="Demo mode lets Run check now be shown in minutes. It only works when the agent's TEST_MODE is on.">
+            <span class="toggle {{ 'on' if demo_on }}"><span></span></span> Demo mode
+          </button>
+        </form>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <button class="text-slate-500 hover:text-slate-900 px-2">Sign out</button>
+        </form>
+      </div>
+    </div>
+    {% if mock %}
+      <div class="bg-amber-100 text-amber-900 text-xs px-4 py-1.5">Mock mode. Every task, draft, email and webhook here is SIMULATED. Nothing touches Gmail or Claude.</div>
+    {% elif demo_on and not status.test_mode %}
+      <div class="bg-amber-100 text-amber-900 text-xs px-4 py-1.5">Demo mode is on, but the agent's TEST_MODE is off, so normal business-day timing and send windows still apply.</div>
+    {% endif %}
+    {% if not status.ok %}
+      <div class="bg-red-600 text-white text-sm px-4 py-2" role="alert">
+        <strong>Agent unavailable.</strong> {{ status.message }} Cached tasks and activity are kept; nothing is shown as sent until the agent confirms it.
+      </div>
+    {% endif %}
+  </header>
+
+  <div id="toasts" class="fixed bottom-4 left-4 z-30 space-y-2 max-w-sm">
+    {% for f in flashes %}
+      <div class="toast toast-{{ f.kind }}" onclick="this.remove()">{{ f.text }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="flex flex-col lg:flex-row">
+    <main class="flex-1 min-w-0 p-4 lg:p-6">
+      {% block content %}{% endblock %}
+    </main>
+
+    <aside class="lg:w-96 lg:shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 bg-white lg:h-[calc(100vh-57px)] lg:sticky lg:top-[57px] flex flex-col">
+      <div class="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="font-semibold text-sm">Live events</h2>
+        <span class="text-xs text-slate-500" title="The agent posts signed webhooks here">{{ webhook_url }}</span>
+      </div>
+      <div id="event-feed" class="overflow-y-auto flex-1 divide-y divide-slate-100 max-h-[60vh] lg:max-h-none"
+           sse-swap="webhook" hx-swap="afterbegin">
+        {% for e in events %}{% include "partials/event.html" %}{% endfor %}
+        {% if not events %}
+          <p id="no-events" class="p-4 text-sm text-slate-500">No webhooks yet. Create a task and press Run check now; each event the agent sends appears here instantly.</p>
+        {% endif %}
+      </div>
+    </aside>
+  </div>
+  <script>
+    // Drop the empty-state note once the first live event arrives.
+    document.body.addEventListener("htmx:sseMessage", () => document.getElementById("no-events")?.remove());
+    // Auto-dismiss toasts.
+    setTimeout(() => document.querySelectorAll(".toast").forEach(t => t.remove()), 8000);
+    document.body.addEventListener("htmx:afterSettle", () =>
+      setTimeout(() => document.querySelectorAll(".toast").forEach(t => t.remove()), 8000));
+    // Network and server errors: show a toast without losing the page.
+    function errorToast(text) {
+      const t = document.createElement("div");
+      t.className = "toast toast-error";
+      t.textContent = text;
+      document.getElementById("toasts").appendChild(t);
+      setTimeout(() => t.remove(), 8000);
+    }
+    document.body.addEventListener("htmx:sendError", () =>
+      errorToast("Network error: the dashboard could not be reached. Your page is unchanged."));
+    document.body.addEventListener("htmx:responseError", e => {
+      const s = e.detail.xhr.status;
+      if (s === 401) return;  // HX-Redirect to the login page handles this
+      errorToast(s === 403 ? "Your session changed. Reload the page and try again." : "Request failed (" + s + "). Your page is unchanged.");
+    });
+  </script>
+</body>
+</html>
