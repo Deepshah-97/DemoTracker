@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Drafts · Follow-Up Demo{% endblock %}
+{% block content %}
+<div hx-get="/drafts" hx-trigger="sse:tasks[!window.draftEdited] delay:400ms" hx-select="#drafts-body" hx-target="#drafts-body" hx-swap="outerHTML"></div>
+<h1 class="text-xl font-semibold mb-4">Drafts</h1>
+<div id="drafts-body">
+{% if error %}<div class="card border-red-300 bg-red-50 p-3 mb-4 text-sm text-red-800" role="alert">{{ error }}</div>{% endif %}
+
+{% if pending %}
+  <section class="mb-6">
+    <h2 class="font-semibold text-sm mb-2">Approved, waiting for the agent to confirm the send</h2>
+    {% for a in pending %}
+      {% set c = cards.get(a.target_id) %}
+      <div class="card p-3 mb-2 text-sm flex items-center gap-2">
+        <span class="spin" style="display:inline-block"></span>
+        <span>{{ c.client_name if c else a.target_id }} &middot; {{ c.external_id if c else "" }}</span>
+        <span class="ml-auto text-xs text-slate-500">Sending... not sent until followup.sent arrives</span>
+      </div>
+    {% endfor %}
+  </section>
+{% endif %}
+
+{% for d in drafts %}
+  <article class="card p-4 mb-4">
+    <div class="flex flex-wrap items-center gap-2 mb-3 text-sm">
+      <a href="/tasks/{{ d.task_id }}" class="font-semibold hover:underline">{{ d.client.name if d.client else d.external_id }}</a>
+      <span class="text-slate-500">{{ d.external_id }} &middot; follow-up {{ d.sequence_number }}</span>
+      {% if d.needs_review %}<span class="pill pill-error">Needs review</span>{% endif %}
+      {% if mock %}<span class="pill pill-sim">SIMULATED</span>{% endif %}
+    </div>
+    <form method="post" action="/drafts/{{ d.id }}/approve" hx-disabled-elt="find button">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="idem" value="{{ new_key() }}">
+      <input type="hidden" name="task_id" value="{{ d.task_id }}">
+      <input type="hidden" name="original_subject" value="{{ d.subject }}">
+      <input type="hidden" name="original_body" value="{{ d.body }}">
+      <label><span class="label">Subject</span><input class="field" name="subject" value="{{ d.subject }}"></label>
+      <label class="block mt-2"><span class="label">Body (edit before approving if you like)</span>
+        <textarea class="field font-sans" name="body" rows="8">{{ d.body }}</textarea></label>
+      {% if d.reason %}<p class="text-xs text-slate-600 mt-2"><strong>AI's reason:</strong> {{ d.reason }}</p>{% endif %}
+      {% if d.context_summary %}<p class="text-xs text-slate-600 mt-1"><strong>Context used:</strong> {{ d.context_summary }}</p>{% endif %}
+      <p class="text-xs text-slate-500 mt-1">Edits are re-checked by the agent before sending.</p>
+      <button class="btn btn-primary mt-3"><span class="spin"></span>Approve and send</button>
+    </form>
+    <form method="post" action="/drafts/{{ d.id }}/reject" class="mt-3 flex flex-wrap gap-2 items-end" hx-disabled-elt="find button">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="idem" value="{{ new_key() }}">
+      <input type="hidden" name="task_id" value="{{ d.task_id }}">
+      <label class="flex-1 min-w-[12rem]"><span class="label">Feedback (optional)</span><input class="field" name="feedback" placeholder="Too pushy, mention the pricing sheet"></label>
+      <button class="btn btn-danger"><span class="spin"></span>Reject</button>
+    </form>
+  </article>
+{% else %}
+  {% if not error %}<p class="text-sm text-slate-500">No drafts waiting. Press Run check now on a task in approve mode to get one.</p>{% endif %}
+{% endfor %}
+</div>
+<script>
+  // Don't replace drafts while someone is editing one; reset after any submit.
+  window.draftEdited = false;
+  document.getElementById("drafts-body").addEventListener("input", () => { window.draftEdited = true; });
+  document.getElementById("drafts-body").addEventListener("submit", () => { window.draftEdited = false; });
+</script>
+{% endblock %}

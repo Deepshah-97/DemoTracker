@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}New task · Follow-Up Demo{% endblock %}
+{% block content %}
+<h1 class="text-xl font-semibold mb-4">New task</h1>
+{% if errors %}
+  <div class="card border-red-300 bg-red-50 p-3 mb-4 text-sm text-red-800" role="alert">
+    <ul class="list-disc pl-5">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}
+{% if not users %}
+  <p class="text-sm text-amber-700 mb-4">Team members could not be loaded from the agent, so the owner list is empty.</p>
+{% endif %}
+<form method="post" action="/tasks" class="card p-4 grid grid-cols-1 md:grid-cols-2 gap-4" hx-disabled-elt="#create-btn">
+  <input type="hidden" name="csrf_token" value="{{ csrf }}">
+  <input type="hidden" name="idem" value="{{ idem }}">
+
+  <label><span class="label">Owner</span>
+    <select name="owner_email" class="field" required
+            hx-get="/partials/threads" hx-trigger="change, load" hx-target="#thread-picker" hx-include="this" hx-boost="false">
+      {% for u in users %}
+        <option value="{{ u.email }}" {{ 'selected' if form.get('owner_email') == u.email }}>{{ u.name }} ({{ u.email }}){{ '' if u.gmail_connected else ' - Gmail not connected' }}</option>
+      {% endfor %}
+    </select></label>
+
+  <label><span class="label">Scenario</span>
+    <select name="scenario" class="field" required id="scenario">
+      {% for s in scenarios %}
+        <option value="{{ s }}" {{ 'selected' if form.get('scenario', 'post_demo') == s }}>{{ scenario_guide[s].label }}</option>
+      {% endfor %}
+    </select>
+    <span id="scenario-help" class="block text-xs text-slate-500 mt-1"></span></label>
+
+  <label><span class="label">Client name</span><input class="field" name="client_name" required value="{{ form.get('client_name', '') }}"></label>
+  <label><span class="label">Client email</span><input class="field" type="email" name="client_email" required value="{{ form.get('client_email', '') }}"></label>
+  <label><span class="label">Client company</span><input class="field" name="client_company" value="{{ form.get('client_company', '') }}"></label>
+  <label><span class="label">Your task ID (optional)</span><input class="field" name="external_id" placeholder="DEMO-001" value="{{ form.get('external_id', '') }}"></label>
+
+  <div class="md:col-span-2">
+    <span class="label">Gmail thread</span>
+    <div id="thread-picker"></div>
+    <input class="field mt-1" name="gmail_thread_id" placeholder="...or paste a thread ID" value="{{ form.get('gmail_thread_id', '') }}">
+  </div>
+
+  <label id="trigger-wrap"><span class="label">Baseline time <span id="trigger-name" class="font-normal text-slate-500"></span></span>
+    <input class="field" type="datetime-local" id="trigger-local">
+    <input type="hidden" name="scenario_trigger_at" id="trigger-iso" value="{{ form.get('scenario_trigger_at', '') }}">
+    <span class="block text-xs text-slate-500 mt-1">Your browser's time zone is used.</span></label>
+
+  <label id="goal-wrap"><span class="label">Goal (custom scenario)</span><input class="field" name="goal" value="{{ form.get('goal', '') }}"></label>
+
+  <label class="md:col-span-2"><span class="label">Notes</span>
+    <textarea class="field" name="notes" rows="4" placeholder="What was discussed and promised, e.g. liked reporting, asked about SSO, promised pricing sheet">{{ form.get('notes', '') }}</textarea>
+    <span class="block text-xs text-slate-500 mt-1">The agent only knows what is in the thread and these notes.</span></label>
+
+  <label><span class="label">Wait (business days)</span><input class="field" type="number" min="0" max="30" name="wait_business_days" placeholder="Scenario default" value="{{ form.get('wait_business_days', '') }}"></label>
+  <label><span class="label">Max follow-ups</span><input class="field" type="number" min="1" max="5" name="max_followups" placeholder="Scenario default" value="{{ form.get('max_followups', '') }}"></label>
+  <label><span class="label">Send mode</span>
+    <select name="send_mode" class="field">
+      <option value="">Owner's setting</option>
+      <option value="approve" {{ 'selected' if form.get('send_mode') == 'approve' }}>Approve each draft</option>
+      <option value="auto" {{ 'selected' if form.get('send_mode') == 'auto' }}>Auto send</option>
+    </select></label>
+
+  <div class="md:col-span-2 flex gap-2">
+    <button type="submit" id="create-btn" class="btn btn-primary"><span class="spin"></span>Create task</button>
+    <a href="/tasks" class="btn">Cancel</a>
+  </div>
+</form>
+<script>
+(() => {
+  const guide = {{ scenario_guide | tojson }};
+  const sel = document.getElementById("scenario"), help = document.getElementById("scenario-help");
+  const local = document.getElementById("trigger-local"), iso = document.getElementById("trigger-iso");
+  const name = document.getElementById("trigger-name"), goal = document.getElementById("goal-wrap");
+  function sync() {
+    const g = guide[sel.value];
+    help.textContent = g.help;
+    name.textContent = g.baseline ? "(" + g.baseline + (g.requires_trigger ? ", required" : ", optional") + ")" : "(not needed)";
+    local.required = !!g.requires_trigger;
+    goal.style.display = sel.value === "custom" ? "" : "none";
+  }
+  const toIso = () => { iso.value = local.value ? new Date(local.value).toISOString() : ""; };
+  local.addEventListener("input", toIso); local.addEventListener("change", toIso);
+  if (iso.value) { const d = new Date(iso.value); if (!isNaN(d)) local.value = new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+  sel.addEventListener("change", sync); sync();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% if note %}<p class="text-xs text-amber-700 mt-1">{{ note }}</p>{% endif %}
+{% if threads %}
+  <select name="thread_pick" class="field mt-1">
+    <option value="">Pick one of the owner's recent threads...</option>
+    {% for t in threads %}
+      <option value="{{ t.thread_id }}">{{ t.subject }} &middot; {{ t.last_sender }} &middot; {{ t.date | when }}</option>
+    {% endfor %}
+  </select>
+{% elif not note %}
+  <p class="text-xs text-slate-500 mt-1">No recent threads found. Paste a thread ID or leave it blank to search by client email.</p>
+{% endif %}

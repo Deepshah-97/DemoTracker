@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ (task or card).external_id }} · Follow-Up Demo{% endblock %}
+{% macro action(url, label, cls="btn", extra="") %}
+  <form method="post" action="{{ url }}" hx-disabled-elt="find button">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="idem" value="{{ new_key() }}">
+    {{ extra | safe }}
+    <button class="{{ cls }}"><span class="spin"></span>{{ label }}</button>
+  </form>
+{% endmacro %}
+{% block content %}
+{% set t = task or card %}
+{% set tid = task.id if task else card.agent_task_id %}
+{% set status_val = t.status %}
+<a href="/tasks" class="text-sm text-slate-500 hover:text-slate-900">&larr; Tasks</a>
+<div hx-get="/tasks/{{ tid }}" hx-trigger="sse:tasks delay:400ms" hx-select="#task-page" hx-target="#task-page" hx-swap="outerHTML"></div>
+<div id="task-page">
+<div class="flex flex-wrap items-center gap-2 mt-2 mb-4">
+  <h1 class="text-xl font-semibold">{{ task.client.name if task and task.client else card.client_name }}</h1>
+  <span class="pill pill-{{ status_val }}">{{ status_labels.get(status_val, status_val) }}</span>
+  {% if t.paused %}<span class="pill pill-paused">Paused</span>{% endif %}
+  {% if mock %}<span class="pill pill-sim">SIMULATED</span>{% endif %}
+  <span class="text-sm text-slate-500">{{ t.external_id }}</span>
+</div>
+
+
+{% if error %}<div class="card border-red-300 bg-red-50 p-3 mb-4 text-sm text-red-800" role="alert">{{ error }} Showing the cached card.</div>{% endif %}
+
+{% if rejected %}
+  <div class="card border-indigo-300 bg-indigo-50 p-3 mb-4 text-sm text-indigo-900">
+    The last draft was rejected and kept in the audit history. The task is paused. Update the notes below if needed, then press <strong>Resume</strong> and the agent will redraft the same follow-up.
+  </div>
+{% endif %}
+{% if status_val == "followed_up" and t.followup_count < t.max_followups %}
+  <p class="text-sm text-slate-600 mb-3">Follow-up {{ t.followup_count }} of {{ t.max_followups }} sent. The agent will check again {{ t.next_check_at | when }} unless the client replies.</p>
+{% elif status_val == "exhausted" %}
+  <p class="text-sm text-slate-600 mb-3">All {{ t.max_followups }} follow-ups were sent without a reply. The task is finished.</p>
+{% endif %}
+
+{% if task %}
+<div class="flex flex-wrap gap-2 mb-4">
+  {% if status_val not in ("replied", "stopped", "exhausted", "error") %}
+    <button class="btn" hx-post="/tasks/{{ tid }}/preview" hx-target="#preview" hx-swap="outerHTML" hx-disabled-elt="this"><span class="spin"></span>Preview draft</button>
+    {{ action("/tasks/" ~ tid ~ "/run", "Run check now", "btn btn-primary") }}
+    {% if task.paused %}{{ action("/tasks/" ~ tid ~ "/resume", "Resume") }}{% else %}{{ action("/tasks/" ~ tid ~ "/pause", "Pause") }}{% endif %}
+    {{ action("/tasks/" ~ tid ~ "/events", "Meeting booked", "btn", '<input type="hidden" name="type" value="meeting_booked">') }}
+    {{ action("/tasks/" ~ tid ~ "/stop", "Stop", "btn btn-danger") }}
+    {% if mock %}
+      <form method="post" action="/tasks/{{ tid }}/simulate-reply"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button class="btn" title="Mock only: pretend the client replied in Gmail">Simulate client reply</button></form>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+  <section class="card p-4 text-sm space-y-1.5">
+    <h2 class="font-semibold mb-2">Details</h2>
+    {% if task %}
+      <div><span class="text-slate-500">Client:</span> {{ task.client.name }} &lt;{{ task.client.email }}&gt;{% if task.client.company %}, {{ task.client.company }}{% endif %}</div>
+      <div><span class="text-slate-500">Scenario:</span> {{ scenario_guide[task.scenario].label if task.scenario in scenario_guide else task.scenario }}{% if task.goal %} &middot; goal: {{ task.goal }}{% endif %}</div>
+      <div><span class="text-slate-500">Owner:</span> {{ task.owner_email }}</div>
+      <div><span class="text-slate-500">Baseline:</span> {{ task.scenario_trigger_at | when }}</div>
+      <div><span class="text-slate-500">Follow-ups:</span> {{ task.followup_count }} of {{ task.max_followups }}, wait {{ task.wait_business_days }} business day(s)</div>
+      <div><span class="text-slate-500">Next check:</span> {{ task.next_check_at | when }}</div>
+      <div><span class="text-slate-500">Gmail thread:</span>
+        {% if task.gmail_thread_url %}<a class="underline" href="{{ task.gmail_thread_url }}" target="_blank" rel="noopener noreferrer">open in Gmail</a>{% else %}{{ task.gmail_thread_id or "found by client email" }}{% endif %}</div>
+      {% if task.stop_reason %}<div><span class="text-slate-500">Stop reason:</span> {{ task.stop_reason }}</div>{% endif %}
+      {% if task.error_message %}<div class="text-red-700"><span class="text-slate-500">Error:</span> {{ task.error_message }}</div>{% endif %}
+      <form method="post" action="/tasks/{{ tid }}/notes" class="pt-3" hx-disabled-elt="find button">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="idem" value="{{ new_key() }}">
+        <label><span class="label">Notes</span><textarea name="notes" rows="4" class="field">{{ task.notes or "" }}</textarea></label>
+        <button class="btn mt-2"><span class="spin"></span>Save notes</button>
+      </form>
+    {% else %}
+      <p class="text-slate-500">Full details are unavailable until the agent is reachable.</p>
+    {% endif %}
+  </section>
+
+  <section class="card p-4 text-sm">
+    <h2 class="font-semibold mb-2">Timeline</h2>
+    <ol class="space-y-2">
+      {% for f in (task.followups if task else []) %}
+        <li class="border-l-2 pl-3 {{ 'border-green-500' if f.status == 'sent' else 'border-slate-300' }}">
+          <div class="flex gap-2 items-center"><strong>Follow-up {{ f.sequence_number }}</strong>
+            <span class="pill pill-{{ 'replied' if f.status == 'sent' else 'waiting' }}">{{ f.status }}</span>
+            {% if f.draft_revision and f.draft_revision > 1 %}<span class="text-xs text-slate-500">revision {{ f.draft_revision }}</span>{% endif %}
+            <span class="ml-auto text-xs text-slate-500">{{ (f.sent_at or f.created_at) | when }}</span></div>
+          {% if f.subject %}<div class="text-slate-600">{{ f.subject }}</div>{% endif %}
+          {% if f.body %}<details><summary class="text-xs text-slate-500 cursor-pointer">Email text</summary><pre class="whitespace-pre-wrap font-sans text-sm bg-slate-50 p-2 rounded mt-1">{{ f.body }}</pre></details>{% endif %}
+        </li>
+      {% endfor %}
+      {% for entry in (task.timeline | reverse if task else []) %}
+        <li class="text-xs text-slate-600 flex gap-2"><span class="text-slate-400 shrink-0">{{ entry.at | when }}</span><code>{{ entry.type }}</code><span>{{ entry.detail or "" }}</span></li>
+      {% endfor %}
+      {% for e in task_events %}
+        <li class="text-xs text-slate-600 flex gap-2"><span class="text-slate-400 shrink-0">{{ e.received_at | when }}</span><span>webhook</span><code>{{ e.event }}</code>{% if e.simulated %}<span class="pill pill-sim">SIM</span>{% endif %}</li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
+</div>
+<div id="preview"></div>
+{% endblock %}
