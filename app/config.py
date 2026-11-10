@@ -47,8 +47,8 @@ class Settings(BaseSettings):
         if len(self.session_secret) < 32:
             raise RuntimeError("SESSION_SECRET must be at least 32 characters")
         if not self.mock_mode and not self.agent_base_url.startswith("https://"):
-            # Plain HTTP is allowed only for the docker-compose internal network.
-            if not self.agent_base_url.startswith("http://agent"):
+            # Plain HTTP is allowed only for the docker-compose network and local development.
+            if not self.agent_base_url.startswith(("http://agent", "http://localhost", "http://127.0.0.1")):
                 raise RuntimeError("AGENT_BASE_URL must use https:// (or be 'mock')")
 
 
