@@ -1,6 +1,7 @@
+import os
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,14 @@ class Settings(BaseSettings):
     agent_timeout_seconds: float = 10.0
     # Mock agent: seconds between a simulated action and its webhook.
     mock_event_delay_seconds: float = 2.0
+
+    @model_validator(mode="after")
+    def _render_public_url(self) -> "Settings":
+        # On Render, default the public URL (and so the webhook URL) to this service's own URL.
+        external = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+        if external and "public_base_url" not in self.model_fields_set:
+            self.public_base_url = external
+        return self
 
     @property
     def mock_mode(self) -> bool:
